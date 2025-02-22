@@ -10,7 +10,8 @@
     <meta name="application-name" content="4mysunshine">
     <meta name="apple-mobile-web-app-title" content="4mysunshine">
     <link rel="manifest" href="manifest.json">
-    <title>4mysunshine</title><style>
+    <title>4mysunshine</title>
+    <style>
     :root {
         --safe-area-inset-top: env(safe-area-inset-top, 0px);
         --safe-area-inset-bottom: env(safe-area-inset-bottom, 20px);
@@ -111,7 +112,8 @@
             padding-bottom: max(15px, env(safe-area-inset-bottom));
         }
     }
-    </style></head>
+    </style>
+</head>
 <body>
     <canvas id="c"></canvas>
     <div id="controls">
@@ -138,7 +140,7 @@
 
         // State variables with higher initial volume
         let volumeLevel = 0.75;  // 50% higher than original
-        let speedLevel = 0.5;
+        let speedLevel = 0.25;   // Start at 25% speed
         let colorRate = 0;
         let baseColor = 200;
         let a, m, v, d, z;
@@ -147,7 +149,7 @@
         const b = {
             x: 0, y: 0, vx: 0, vy: 0, r: 5,
             c: `hsl(${baseColor}, 70%, 85%)`,
-            a: 0,
+            a: 1,  // Start active
             brightness: 85
         };
 
@@ -171,7 +173,7 @@
                 }
                 v.buffer = buffer;
             }
-            if (a.state === 'suspended') {
+            if (a?.state === 'suspended') {
                 a.resume();
             }
         };
@@ -256,9 +258,12 @@
             tl = tl.filter(particle => particle.life > 0);
         };
 
-        // Sound generation
+        // Sound generation with iOS fixes
         const pN = (i, time) => {
-            if (!a) return;
+            if (!a || a.state !== 'running') {
+                initAudioContext();
+                if (!a || a.state !== 'running') return;
+            }
             
             const o = a.createOscillator();
             const g = a.createGain();
@@ -322,6 +327,7 @@
                     b.vy = vx*sn + vy*cs;
                     const noteIndex = Math.floor(d / (r/f.length));
                     pN(noteIndex % f.length, a ? a.currentTime : 0);
+                    b.c = q
                     b.c = q.c;
                     aT(b.x, b.y, b.vx, b.vy, b.c);
                 }
@@ -329,7 +335,6 @@
         };
 
         // Main update loop
-        
         const u = () => {
             if(!g) return;
             t += 0.016;
@@ -393,20 +398,19 @@
             gP();
         };
 
-        // Initialize
+        // Initialize with iOS fixes
         window.onload = () => {
             rS();
             window.onresize = rS;
-            document.onclick = initAudioContext;
-            document.ontouchstart = initAudioContext;
             
             // Initial velocity
             b.vx = (Math.random()-0.5)*10;
             b.vy = (Math.random()-0.5)*10;
             
-            // UI controls
+            // UI controls with iOS audio fixes
             document.getElementById('volumeSlider').oninput = (e) => {
                 volumeLevel = e.target.value / 10;
+                if (m) m.gain.value = 0.45 * volumeLevel;
             };
             
             document.getElementById('speedSlider').oninput = (e) => {
@@ -417,16 +421,19 @@
                 colorRate = (e.target.value - 1) / 9;
             };
             
+            // Start animation
             u();
+
+            // iOS audio initialization
+            const initAudio = () => {
+                initAudioContext();
+                document.removeEventListener('touchstart', initAudio);
+                document.removeEventListener('click', initAudio);
+            };
+
+            document.addEventListener('touchstart', initAudio, {passive: true});
+            document.addEventListener('click', initAudio);
         };
-        
-        window.addEventListener('load', () => {
-            rs();
-            b.a = 1;  // Activate ball movement
-            b.vx = (Math.random() - 0.5) * 10;  // Initial velocity
-            b.vy = (Math.random() - 0.5) * 10;
-            u();  // Start animation
-        });
-</script>
-    </body>
+    </script>
+</body>
 </html>
