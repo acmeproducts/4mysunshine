@@ -328,142 +328,337 @@
             ];
         } else {
             const h = t * colorRate * 20 % 360;
-            return [
-                `hsl(${h}, 70%, 85%)`,
-                `hsl(${(h+120)%360}, 70%, 85%)`,
-                `hsl(${(h+240)%360}, 70%, 85%)`
-            ];
+// Core variables
+const f = [293.66, 329.63, 369.99, 440.00, 493.88];
+const c = document.getElementById('c');
+const x = c.getContext('2d');
+let w, h, r, g = 1, p = [], t = 0, n = 0, st, tl = [];
+let dpr = window.devicePixelRatio || 1;
+
+// State variables
+let volumeLevel = 0.75;
+let speedLevel = 0.25;
+let colorRate = 0;
+let baseColor = 200;
+let a, m, v, d, z;
+let lastAudioTime = 0;
+let audioAttempts = 0;
+
+// Ball object
+const b = {
+    x: 0, y: 0, vx: 0, vy: 0, r: 5,
+    c: `hsl(${baseColor}, 70%, 85%)`,
+    a: 1,
+    brightness: 85
+};
+
+// Audio Context setup
+const initAudioContext = () => {
+    if (!a) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        a = new AudioContext({
+            latencyHint: 'interactive',
+            sampleRate: 44100
+        });
+        
+        m = a.createGain();
+        v = a.createConvolver();
+        d = a.createDelay();
+        z = a.createGain();
+        
+        m.connect(v); v.connect(d); d.connect(z); z.connect(a.destination);
+        
+        m.gain.value = 0.75;
+        d.delayTime.value = 0.4;
+        z.gain.value = 0.8;
+        
+        const buffer = a.createBuffer(2, a.sampleRate * 4, a.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < buffer.length; i++) {
+            data[i] = Math.exp(-i/buffer.length * 4) * (Math.random() * 2 - 1) * 0.7;
         }
-    };
+        v.buffer = buffer;
 
-    // Trail particle class (Your existing TrailParticle class here...)
-
-    // Particle generation (Your existing gP function here...)
-
-    // Trail management (Your existing aT and uT functions here...)
-
-    // Enhanced sound generation with mute detection
-    const pN = (i, time) => {
-        if (!a || a.state !== 'running') {
-            initAudioContext();
-            if (!a || a.state !== 'running') {
-                audioAttempts++;
-                checkAudio();
-                return;
-            }
-        }
-        
-        const o = a.createOscillator();
-        const g = a.createGain();
-        o.connect(g); g.connect(m);
-        o.frequency.value = f[i];
-        o.type = 'sine';
-        
-        // Improved volume curve
-        const scaledVolume = Math.pow(volumeLevel, 1.5); // Non-linear scaling
-        g.gain.setValueAtTime(0, time);
-        g.gain.linearRampToValueAtTime(0.6 * scaledVolume, time + 0.1);
-        g.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
-        o.start(time); 
-        o.stop(time + 2.5);
-        
-        const h = a.createOscillator();
-        const j = a.createGain();
-        h.connect(j); j.connect(m);
-        h.frequency.value = f[i]*1.5;
-        h.type = 'sine';
-        j.gain.setValueAtTime(0, time);
-        j.gain.linearRampToValueAtTime(0.3 * scaledVolume, time + 0.1);
-        j.gain.exponentialRampToValueAtTime(0.001, time + 2);
-        h.start(time); 
-        h.stop(time + 2);
-        
-        lastAudioTime = Date.now();
-        audioAttempts = 0;
-        checkAudio();
-        n++;
-    };
-
-    // Collision detection (Your existing cC function here...)
-
-    // Main update loop (Your existing u function here...)
-
-    // Enhanced window resize handling
-    const rS = () => {
-        w = window.innerWidth;
-        h = window.innerHeight;
-        r = Math.min(w,h)*0.45;
-        c.width = w * dpr;
-        c.height = h * dpr;
-        c.style.width = w + 'px';
-        c.style.height = h + 'px';
-        x.scale(dpr, dpr);
-        gP();
-
-        // Adjust controls position based on orientation
-        const controls = document.getElementById('controls');
-        if (window.matchMedia("(orientation: landscape)").matches) {
-            controls.style.right = `calc(20px + ${window.env?.('safe-area-inset-right', '0px')})`;
-            controls.style.bottom = '50%';
-        } else {
-            controls.style.right = 'auto';
-            controls.style.bottom = `calc(20px + ${window.env?.('safe-area-inset-bottom', '20px')})`;
-        }
-    };
-
-    // Initialize with improved event handling
-    window.onload = () => {
-        rS();
-        window.onresize = rS;
-        
-        // Initial velocity
-        b.vx = (Math.random()-0.5)*10;
-        b.vy = (Math.random()-0.5)*10;
-        
-        // Enhanced UI controls
-        document.getElementById('volumeSlider').oninput = (e) => {
-            volumeLevel = e.target.value / 100; // Using full range 0-100
-            if (m) {
-                const scaledVolume = Math.pow(volumeLevel, 1.5);
-                m.gain.setValueAtTime(scaledVolume, a?.currentTime || 0);
-            }
-        };
-        
-        document.getElementById('speedSlider').oninput = (e) => {
-            speedLevel = e.target.value / 100;
-        };
-        
-        document.getElementById('colorSlider').oninput = (e) => {
-            colorRate = e.target.value / 100;
-        };
-
-        // iOS audio initialization
-        const initAudio = (e) => {
-            initAudioContext();
-            lastAudioTime = Date.now();
-            if (e.type === 'touchstart') {
-                document.removeEventListener('touchstart', initAudio);
-            } else {
-                document.removeEventListener('click', initAudio);
-            }
-        };
-
-        document.addEventListener('touchstart', initAudio, {passive: true});
-        document.addEventListener('click', initAudio);
-        
-        // Start animation
-        u();
-    };
-
-    // Handle orientation changes
-    window.addEventListener('orientationchange', () => {
-        setTimeout(rS, 100); // Delay to ensure new dimensions are available
-    });
-
-    // Request fullscreen on iOS when added to home screen
-    if (window.navigator.standalone) {
-        document.documentElement.requestFullscreen?.();
+        a.resume().then(() => {
+            const silent = a.createOscillator();
+            const silentGain = a.createGain();
+            silentGain.gain.value = 0.001;
+            silent.connect(silentGain);
+            silentGain.connect(a.destination);
+            silent.start();
+            silent.stop(a.currentTime + 0.001);
+        });
     }
+    if (a?.state === 'suspended') {
+        a.resume();
+    }
+};
+
+// Mute detection
+const checkAudio = () => {
+    const now = Date.now();
+    if (now - lastAudioTime > 2000 && audioAttempts > 2) {
+        document.getElementById('mute-warning').style.display = 'block';
+    } else {
+        document.getElementById('mute-warning').style.display = 'none';
+    }
+};
+
+// Color generation
+const gC = () => {
+    if (colorRate === 0) {
+        b.brightness = 85 + Math.sin(t * 2) * 15;
+        return [
+            `hsl(${baseColor}, 70%, ${b.brightness}%)`,
+            `hsl(${baseColor}, 70%, ${Math.max(50, b.brightness - 20)}%)`,
+            `hsl(${baseColor}, 70%, ${Math.max(40, b.brightness - 30)}%)`
+        ];
+    } else {
+        const h = t * colorRate * 20 % 360;
+        return [
+            `hsl(${h}, 70%, 85%)`,
+            `hsl(${(h+120)%360}, 70%, 85%)`,
+            `hsl(${(h+240)%360}, 70%, 85%)`
+        ];
+    }
+};
+
+// Trail particle
+class TrailParticle {
+    constructor(x, y, c) {
+        this.x = x;
+        this.y = y;
+        this.a = 1;
+        this.c = c;
+        this.v = 0.05 + Math.random() * 0.05;
+    }
+
+    update() {
+        this.a -= this.v;
+        return this.a > 0;
+    }
+
+    draw(ctx) {
+        ctx.fillStyle = this.c.replace(')', `,${this.a})`).replace('rgb', 'rgba');
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// Generate particles
+function gP() {
+    p = [];
+    const count = Math.floor((w + h) / 50);
+    for (let i = 0; i < count; i++) {
+        p.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 2,
+            vy: (Math.random() - 0.5) * 2,
+            r: 2 + Math.random() * 3
+        });
+    }
+}
+
+// Add trail
+function aT(x, y, colors) {
+    for (let i = 0; i < 3; i++) {
+        tl.push(new TrailParticle(
+            x + (Math.random() - 0.5) * 10,
+            y + (Math.random() - 0.5) * 10,
+            colors[Math.floor(Math.random() * colors.length)]
+        ));
+    }
+}
+
+// Update trails
+function uT() {
+    tl = tl.filter(p => p.update());
+    tl.forEach(p => p.draw(x));
+}
+
+// Play note
+const pN = (i, time) => {
+    if (!a || a.state !== 'running') {
+        initAudioContext();
+        if (!a || a.state !== 'running') {
+            audioAttempts++;
+            checkAudio();
+            return;
+        }
+    }
+    
+    const o = a.createOscillator();
+    const g = a.createGain();
+    o.connect(g); g.connect(m);
+    o.frequency.value = f[i];
+    o.type = 'sine';
+    
+    const scaledVolume = Math.pow(volumeLevel, 1.5);
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(0.6 * scaledVolume, time + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
+    o.start(time); 
+    o.stop(time + 2.5);
+    
+    const h = a.createOscillator();
+    const j = a.createGain();
+    h.connect(j); j.connect(m);
+    h.frequency.value = f[i]*1.5;
+    h.type = 'sine';
+    j.gain.setValueAtTime(0, time);
+    j.gain.linearRampToValueAtTime(0.3 * scaledVolume, time + 0.1);
+    j.gain.exponentialRampToValueAtTime(0.001, time + 2);
+    h.start(time); 
+    h.stop(time + 2);
+    
+    lastAudioTime = Date.now();
+    audioAttempts = 0;
+    checkAudio();
+    n++;
+};
+
+// Check collisions
+function cC() {
+    const dx = w/2 - b.x;
+    const dy = h/2 - b.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    
+    if (d > r) {
+        const angle = Math.atan2(dy, dx);
+        b.x = w/2 - r * Math.cos(angle);
+        b.y = h/2 - r * Math.sin(angle);
+        b.vx = (Math.random() - 0.5) * 10;
+        b.vy = (Math.random() - 0.5) * 10;
+        if (n % 5 === 0) pN(Math.floor(Math.random() * f.length), a?.currentTime || 0);
+    }
+    
+    p.forEach((p, i) => {
+        const dx = p.x - b.x;
+        const dy = p.y - b.y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        
+        if (d < p.r + b.r) {
+            pN(i % f.length, a?.currentTime || 0);
+            p.x = Math.random() * w;
+            p.y = Math.random() * h;
+        }
+    });
+}
+
+// Main update loop
+function u() {
+    t += 0.016 * (speedLevel * 2 + 0.5);
+    
+    x.fillStyle = '#000';
+    x.fillRect(0, 0, w, h);
+    
+    b.x += b.vx;
+    b.y += b.vy;
+    
+    x.strokeStyle = 'rgba(255,255,255,0.1)';
+    x.beginPath();
+    x.arc(w/2, h/2, r, 0, Math.PI * 2);
+    x.stroke();
+    
+    p.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = w;
+        if (p.x > w) p.x = 0;
+        if (p.y < 0) p.y = h;
+        if (p.y > h) p.y = 0;
+        
+        x.fillStyle = 'rgba(255,255,255,0.5)';
+        x.beginPath();
+        x.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        x.fill();
+    });
+    
+    cC();
+    
+    const colors = gC();
+    aT(b.x, b.y, colors);
+    uT();
+    
+    x.fillStyle = colors[0];
+    x.beginPath();
+    x.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    x.fill();
+    
+    requestAnimationFrame(u);
+}
+
+// Resize handling
+const rS = () => {
+    w = window.innerWidth;
+    h = window.innerHeight;
+    r = Math.min(w,h)*0.45;
+    c.width = w * dpr;
+    c.height = h * dpr;
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
+    x.scale(dpr, dpr);
+    gP();
+
+    const controls = document.getElementById('controls');
+    if (window.matchMedia("(orientation: landscape)").matches) {
+        controls.style.right = `calc(20px + ${window.env?.('safe-area-inset-right', '0px')})`;
+        controls.style.bottom = '50%';
+    } else {
+        controls.style.right = 'auto';
+        controls.style.bottom = `calc(20px + ${window.env?.('safe-area-inset-bottom', '20px')})`;
+    }
+};
+
+// Initialize
+window.onload = () => {
+    rS();
+    window.onresize = rS;
+    
+    b.vx = (Math.random()-0.5)*10;
+    b.vy = (Math.random()-0.5)*10;
+    
+    document.getElementById('volumeSlider').oninput = (e) => {
+        volumeLevel = e.target.value / 100;
+        if (m) {
+            const scaledVolume = Math.pow(volumeLevel, 1.5);
+            m.gain.setValueAtTime(scaledVolume, a?.currentTime || 0);
+        }
+    };
+    
+    document.getElementById('speedSlider').oninput = (e) => {
+        speedLevel = e.target.value / 100;
+    };
+    
+    document.getElementById('colorSlider').oninput = (e) => {
+        colorRate = e.target.value / 100;
+    };
+
+    const initAudio = (e) => {
+        initAudioContext();
+        lastAudioTime = Date.now();
+        if (e.type === 'touchstart') {
+            document.removeEventListener('touchstart', initAudio);
+        } else {
+            document.removeEventListener('click', initAudio);
+        }
+    };
+
+    document.addEventListener('touchstart', initAudio, {passive: true});
+    document.addEventListener('click', initAudio);
+    
+    u();
+};
+
+window.addEventListener('orientationchange', () => {
+    setTimeout(rS, 100);
+});
+
+if (window.navigator.standalone) {
+    document.documentElement.requestFullscreen?.();
+}
 </script>
 </body>
 </html> 
