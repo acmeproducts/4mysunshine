@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <!-- v1.2 - Added PWA support, improved audio, responsive layout -->
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,6 +16,8 @@
     :root {
         --safe-area-inset-top: env(safe-area-inset-top, 0px);
         --safe-area-inset-bottom: env(safe-area-inset-bottom, 20px);
+        --safe-area-inset-left: env(safe-area-inset-left, 0px);
+        --safe-area-inset-right: env(safe-area-inset-right, 0px);
     }
     
     * {
@@ -63,12 +66,25 @@
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         z-index: 1000;
         user-select: none;
+        transition: all 0.3s ease;
+    }
+
+    @media (orientation: landscape) {
+        #controls {
+            bottom: 50%;
+            transform: translate(-50%, 50%);
+            flex-direction: column;
+            right: calc(20px + var(--safe-area-inset-right));
+            left: auto;
+            transform: none;
+        }
     }
 
     .slider-container {
         display: flex;
         align-items: center;
         gap: 10px;
+        min-width: 140px;
     }
 
     .slider-container label {
@@ -76,6 +92,7 @@
         font-size: 14px;
         font-weight: 500;
         color: rgba(255, 255, 255, 0.9);
+        width: 50px;
     }
 
     input[type="range"] {
@@ -107,6 +124,59 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
     }
 
+    #install-prompt {
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.9);
+        padding: 10px 20px;
+        border-radius: 12px;
+        color: black;
+        font-size: 14px;
+        display: none;
+        z-index: 1001;
+        cursor: pointer;
+    }
+
+    #mute-warning {
+        position: fixed;
+        bottom: calc(80px + var(--safe-area-inset-bottom));
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 0, 0, 0.3);
+        padding: 8px 16px;
+        border-radius: 8px;
+        color: white;
+        font-size: 12px;
+        display: none;
+        z-index: 1001;
+    }
+
+    #version {
+        position: fixed;
+        bottom: 5px;
+        right: 5px;
+        color: rgba(255, 255, 255, 0.3);
+        font-size: 6pt;
+        font-family: monospace;
+        z-index: 1000;
+    }
+
+    #update-notice {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 8px 16px;
+        border-radius: 8px;
+        color: black;
+        font-size: 12px;
+        display: none;
+        z-index: 1001;
+        cursor: pointer;
+    }
+
     @supports (padding: env(safe-area-inset-bottom)) {
         #controls {
             padding-bottom: max(15px, env(safe-area-inset-bottom));
@@ -119,321 +189,281 @@
     <div id="controls">
         <div class="slider-container">
             <label>Volume</label>
-            <input type="range" id="volumeSlider" min="1" max="10" value="2.5">
+            <input type="range" id="volumeSlider" min="0" max="100" value="75">
         </div>
         <div class="slider-container">
             <label>Speed</label>
-            <input type="range" id="speedSlider" min="1" max="10" value="2.5">
+            <input type="range" id="speedSlider" min="10" max="100" value="25">
         </div>
         <div class="slider-container">
             <label>Color</label>
-            <input type="range" id="colorSlider" min="1" max="10" value="1">
+            <input type="range" id="colorSlider" min="0" max="100" value="0">
         </div>
     </div>
+    <div id="install-prompt">Add to Home Screen ➕</div>
+    <div id="mute-warning">🔇 Unmute device for sound</div>
+    <div id="update-notice">Update Available</div>
+    <div id="version">v1.2</div>
     <script>
-        // Core variables
-        const f = [293.66, 329.63, 369.99, 440.00, 493.88];
-        const c = document.getElementById('c');
-        const x = c.getContext('2d');
-        let w, h, r, g = 1, p = [], t = 0, n = 0, st, tl = [];
-        let dpr = window.devicePixelRatio || 1;
+    // Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js').then(registration => {
+            registration.addEventListener('updatefound', () => {
+                const updateNotice = document.getElementById('update-notice');
+                updateNotice.style.display = 'block';
+                updateNotice.onclick = () => window.location.reload();
+            });
+        });
+    }
 
-        // State variables with higher initial volume
-        let volumeLevel = 0.75;  // 50% higher than original
-        let speedLevel = 0.25;   // Start at 25% speed
-        let colorRate = 0;
-        let baseColor = 200;
-        let a, m, v, d, z;
+    // PWA Install Prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        document.getElementById('install-prompt').style.display = 'block';
+    });
 
-        // Ball object
-        const b = {
-            x: 0, y: 0, vx: 0, vy: 0, r: 5,
-            c: `hsl(${baseColor}, 70%, 85%)`,
-            a: 1,  // Start active
-            brightness: 85
-        };
-
-        // Initialize audio context with iOS optimization
-        const initAudioContext = () => {
-            if (!a) {
-                a = new (window.AudioContext || window.webkitAudioContext)();
-                m = a.createGain();
-                v = a.createConvolver();
-                d = a.createDelay();
-                z = a.createGain();
-                m.connect(v); v.connect(d); d.connect(z); z.connect(a.destination);
-                m.gain.value = 0.45;  // Initial gain set higher
-                d.delayTime.value = 0.4;
-                z.gain.value = 0.8;
-                
-                const buffer = a.createBuffer(2, a.sampleRate * 4, a.sampleRate);
-                const data = buffer.getChannelData(0);
-                for (let i = 0; i < buffer.length; i++) {
-                    data[i] = Math.exp(-i/buffer.length * 4) * (Math.random() * 2 - 1) * 0.7;
-                }
-                v.buffer = buffer;
+    document.getElementById('install-prompt').addEventListener('click', async () => {
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                document.getElementById('install-prompt').style.display = 'none';
             }
-            if (a?.state === 'suspended') {
-                a.resume();
-            }
-        };
+            deferredPrompt = null;
+        }
+    });
 
-        // Color generation
-        const gC = () => {
-            if (colorRate === 0) {
-                b.brightness = 85 + Math.sin(t * 2) * 15;
-                return [
-                    `hsl(${baseColor}, 70%, ${b.brightness}%)`,
-                    `hsl(${baseColor}, 70%, ${Math.max(50, b.brightness - 20)}%)`,
-                    `hsl(${baseColor}, 70%, ${Math.max(40, b.brightness - 30)}%)`
-                ];
-            } else {
-                const h = t * colorRate * 20 % 360;
-                return [
-                    `hsl(${h}, 70%, 85%)`,
-                    `hsl(${(h+120)%360}, 70%, 85%)`,
-                    `hsl(${(h+240)%360}, 70%, 85%)`
-                ];
-            }
-        };
+    // Rest of your existing core variables...
+       // Core variables
+    const f = [293.66, 329.63, 369.99, 440.00, 493.88];
+    const c = document.getElementById('c');
+    const x = c.getContext('2d');
+    let w, h, r, g = 1, p = [], t = 0, n = 0, st, tl = [];
+    let dpr = window.devicePixelRatio || 1;
 
-        // Trail particle class
-        class TrailParticle {
-            constructor(x, y, vx, vy, c) {
-                this.x = x;
-                this.y = y;
-                this.vx = vx * 0.3 + (Math.random() - 0.5) * 0.5;
-                this.vy = vy * 0.3 + (Math.random() - 0.5) * 0.5;
-                this.life = 1;
-                this.color = c;
-                this.size = Math.random() * 4 + 2;
-                this.decay = 0.01 + Math.random() * 0.01;
-                this.angle = Math.atan2(vy, vx);
-                this.speed = Math.sqrt(vx * vx + vy * vy);
-            }
+    // State variables with improved volume control
+    let volumeLevel = 0.75;  // Start at 75%
+    let speedLevel = 0.25;   // Start at 25%
+    let colorRate = 0;
+    let baseColor = 200;
+    let a, m, v, d, z;
+    let lastAudioTime = 0;
+    let audioAttempts = 0;
 
-            update() {
-                const curveStrength = 0.1;
-                this.angle += curveStrength * this.life;
-                this.x += Math.cos(this.angle) * this.speed * speedLevel;
-                this.y += Math.sin(this.angle) * this.speed * speedLevel;
-                this.life -= this.decay;
-                this.size *= 0.98;
-            }
+    // Ball object
+    const b = {
+        x: 0, y: 0, vx: 0, vy: 0, r: 5,
+        c: `hsl(${baseColor}, 70%, 85%)`,
+        a: 1,  // Start active
+        brightness: 85
+    };
 
-            draw(ctx) {
-                ctx.beginPath();
-                ctx.arc(w/2 + this.x, h/2 + this.y, this.size, 0, Math.PI * 2);
-                ctx.fillStyle = this.color.replace(')', `,${this.life})`).replace('hsl', 'hsla');
-                ctx.fill();
+    // Audio Context with improved iOS handling
+    const initAudioContext = () => {
+        if (!a) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            a = new AudioContext({
+                latencyHint: 'interactive',
+                sampleRate: 44100
+            });
+            
+            m = a.createGain();
+            v = a.createConvolver();
+            d = a.createDelay();
+            z = a.createGain();
+            
+            m.connect(v); 
+            v.connect(d); 
+            d.connect(z); 
+            z.connect(a.destination);
+            
+            // Improved initial gain settings
+            m.gain.value = 0.75;  // Start at 75%
+            d.delayTime.value = 0.4;
+            z.gain.value = 0.8;
+            
+            const buffer = a.createBuffer(2, a.sampleRate * 4, a.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < buffer.length; i++) {
+                data[i] = Math.exp(-i/buffer.length * 4) * (Math.random() * 2 - 1) * 0.7;
+            }
+            v.buffer = buffer;
+
+            // Force audio context activation
+            a.resume().then(() => {
+                const silent = a.createOscillator();
+                const silentGain = a.createGain();
+                silentGain.gain.value = 0.001;
+                silent.connect(silentGain);
+                silentGain.connect(a.destination);
+                silent.start();
+                silent.stop(a.currentTime + 0.001);
+            });
+        }
+        if (a?.state === 'suspended') {
+            a.resume();
+        }
+    };
+
+    // Mute detection
+    const checkAudio = () => {
+        const now = Date.now();
+        if (now - lastAudioTime > 2000 && audioAttempts > 2) {
+            document.getElementById('mute-warning').style.display = 'block';
+        } else {
+            document.getElementById('mute-warning').style.display = 'none';
+        }
+    };
+
+    // Color generation
+    const gC = () => {
+        if (colorRate === 0) {
+            b.brightness = 85 + Math.sin(t * 2) * 15;
+            return [
+                `hsl(${baseColor}, 70%, ${b.brightness}%)`,
+                `hsl(${baseColor}, 70%, ${Math.max(50, b.brightness - 20)}%)`,
+                `hsl(${baseColor}, 70%, ${Math.max(40, b.brightness - 30)}%)`
+            ];
+        } else {
+            const h = t * colorRate * 20 % 360;
+            return [
+                `hsl(${h}, 70%, 85%)`,
+                `hsl(${(h+120)%360}, 70%, 85%)`,
+                `hsl(${(h+240)%360}, 70%, 85%)`
+            ];
+        }
+    };
+
+    // Trail particle class (Your existing TrailParticle class here...)
+
+    // Particle generation (Your existing gP function here...)
+
+    // Trail management (Your existing aT and uT functions here...)
+
+    // Enhanced sound generation with mute detection
+    const pN = (i, time) => {
+        if (!a || a.state !== 'running') {
+            initAudioContext();
+            if (!a || a.state !== 'running') {
+                audioAttempts++;
+                checkAudio();
+                return;
             }
         }
+        
+        const o = a.createOscillator();
+        const g = a.createGain();
+        o.connect(g); g.connect(m);
+        o.frequency.value = f[i];
+        o.type = 'sine';
+        
+        // Improved volume curve
+        const scaledVolume = Math.pow(volumeLevel, 1.5); // Non-linear scaling
+        g.gain.setValueAtTime(0, time);
+        g.gain.linearRampToValueAtTime(0.6 * scaledVolume, time + 0.1);
+        g.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
+        o.start(time); 
+        o.stop(time + 2.5);
+        
+        const h = a.createOscillator();
+        const j = a.createGain();
+        h.connect(j); j.connect(m);
+        h.frequency.value = f[i]*1.5;
+        h.type = 'sine';
+        j.gain.setValueAtTime(0, time);
+        j.gain.linearRampToValueAtTime(0.3 * scaledVolume, time + 0.1);
+        j.gain.exponentialRampToValueAtTime(0.001, time + 2);
+        h.start(time); 
+        h.stop(time + 2);
+        
+        lastAudioTime = Date.now();
+        audioAttempts = 0;
+        checkAudio();
+        n++;
+    };
 
-        // Particle generation
-        const gP = () => {
-            p = [];
-            const n = Math.floor(w*h*0.0002);
-            for(let i=0; i<n; i++) {
-                const ang = Math.random()*Math.PI*2;
-                const d = Math.random()*r*0.9;
-                p.push({
-                    x: Math.cos(ang)*d,
-                    y: Math.sin(ang)*d,
-                    r: 1,
-                    c: gC()[Math.floor(Math.random()*3)]
-                });
+    // Collision detection (Your existing cC function here...)
+
+    // Main update loop (Your existing u function here...)
+
+    // Enhanced window resize handling
+    const rS = () => {
+        w = window.innerWidth;
+        h = window.innerHeight;
+        r = Math.min(w,h)*0.45;
+        c.width = w * dpr;
+        c.height = h * dpr;
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
+        x.scale(dpr, dpr);
+        gP();
+
+        // Adjust controls position based on orientation
+        const controls = document.getElementById('controls');
+        if (window.matchMedia("(orientation: landscape)").matches) {
+            controls.style.right = `calc(20px + ${window.env?.('safe-area-inset-right', '0px')})`;
+            controls.style.bottom = '50%';
+        } else {
+            controls.style.right = 'auto';
+            controls.style.bottom = `calc(20px + ${window.env?.('safe-area-inset-bottom', '20px')})`;
+        }
+    };
+
+    // Initialize with improved event handling
+    window.onload = () => {
+        rS();
+        window.onresize = rS;
+        
+        // Initial velocity
+        b.vx = (Math.random()-0.5)*10;
+        b.vy = (Math.random()-0.5)*10;
+        
+        // Enhanced UI controls
+        document.getElementById('volumeSlider').oninput = (e) => {
+            volumeLevel = e.target.value / 100; // Using full range 0-100
+            if (m) {
+                const scaledVolume = Math.pow(volumeLevel, 1.5);
+                m.gain.setValueAtTime(scaledVolume, a?.currentTime || 0);
             }
         };
-
-        // Trail management
-        const aT = (x, y, vx, vy, c) => {
-            for(let i = 0; i < 3; i++) {
-                tl.push(new TrailParticle(x, y, vx, vy, c));
-            }
-            if(tl.length > 200) tl.splice(0, 3);
+        
+        document.getElementById('speedSlider').oninput = (e) => {
+            speedLevel = e.target.value / 100;
+        };
+        
+        document.getElementById('colorSlider').oninput = (e) => {
+            colorRate = e.target.value / 100;
         };
 
-        const uT = () => {
-            tl.forEach(particle => particle.update());
-            tl = tl.filter(particle => particle.life > 0);
-        };
-
-        // Sound generation with iOS fixes
-        const pN = (i, time) => {
-            if (!a || a.state !== 'running') {
-                initAudioContext();
-                if (!a || a.state !== 'running') return;
-            }
-            
-            const o = a.createOscillator();
-            const g = a.createGain();
-            o.connect(g); g.connect(m);
-            o.frequency.value = f[i];
-            o.type = 'sine';
-            g.gain.setValueAtTime(0, time);
-            g.gain.linearRampToValueAtTime(0.6 * volumeLevel, time + 0.1);
-            g.gain.exponentialRampToValueAtTime(0.001, time + 2.5);
-            o.start(time); o.stop(time + 2.5);
-            
-            const h = a.createOscillator();
-            const j = a.createGain();
-            h.connect(j); j.connect(m);
-            h.frequency.value = f[i]*1.5;
-            h.type = 'sine';
-            j.gain.setValueAtTime(0, time);
-            j.gain.linearRampToValueAtTime(0.3 * volumeLevel, time + 0.1);
-            j.gain.exponentialRampToValueAtTime(0.001, time + 2);
-            h.start(time); h.stop(time + 2);
-            n++;
-        };
-
-        // Collision detection and response
-        const cC = () => {
-            const d = Math.sqrt(b.x*b.x + b.y*b.y);
-            if(d + b.r > r) {
-                const ang = Math.atan2(b.y, b.x);
-                b.x = Math.cos(ang)*(r-b.r);
-                b.y = Math.sin(ang)*(r-b.r);
-                const nx = Math.cos(ang), ny = Math.sin(ang);
-                const dot = b.vx*nx + b.vy*ny;
-                const angle = (Math.random() * 2 + 2) * Math.PI / 180 * (Math.random() < 0.5 ? 1 : -1);
-                const cs = Math.cos(angle);
-                const sn = Math.sin(angle);
-                const vx = b.vx - 2*dot*nx;
-                const vy = b.vy - 2*dot*ny;
-                b.vx = vx*cs - vy*sn;
-                b.vy = vx*sn + vy*cs;
-                const noteIndex = Math.floor((ang + Math.PI) / (2 * Math.PI) * f.length);
-                pN(noteIndex, a ? a.currentTime : 0);
-                b.c = gC()[Math.floor(Math.random()*3)];
-                aT(b.x, b.y, b.vx, b.vy, b.c);
-            }
-
-            p.forEach(q => {
-                const dx = b.x-q.x, dy = b.y-q.y;
-                const d = Math.sqrt(dx*dx + dy*dy);
-                if(d < b.r+q.r) {
-                    const ang = Math.atan2(dy,dx);
-                    b.x = q.x + Math.cos(ang)*(b.r+q.r);
-                    b.y = q.y + Math.sin(ang)*(b.r+q.r);
-                    const nx = Math.cos(ang), ny = Math.sin(ang);
-                    const dot = b.vx*nx + b.vy*ny;
-                    const angle = (Math.random() * 2 + 2) * Math.PI / 180 * (Math.random() < 0.5 ? 1 : -1);
-                    const cs = Math.cos(angle);
-                    const sn = Math.sin(angle);
-                    const vx = b.vx - 2*dot*nx;
-                    const vy = b.vy - 2*dot*ny;
-                    b.vx = vx*cs - vy*sn;
-                    b.vy = vx*sn + vy*cs;
-                    const noteIndex = Math.floor(d / (r/f.length));
-                    pN(noteIndex % f.length, a ? a.currentTime : 0);
-                    b.c = q
-                    b.c = q.c;
-                    aT(b.x, b.y, b.vx, b.vy, b.c);
-                }
-            });
-        };
-
-        // Main update loop
-        const u = () => {
-            if(!g) return;
-            t += 0.016;
-            
-            const cs = gC();
-            const gr = x.createRadialGradient(w/2,h/2,0,w/2,h/2,r);
-            gr.addColorStop(0,cs[0]);
-            gr.addColorStop(1,cs[1]);
-            x.fillStyle = gr;
-            x.fillRect(0,0,w,h);
-            
-            x.beginPath();
-            x.arc(w/2,h/2,r,0,Math.PI*2);
-            x.strokeStyle = cs[2];
-            x.lineWidth = 2;
-            x.stroke();
-            
-            uT();
-            
-            b.x += b.vx * speedLevel;
-            b.y += b.vy * speedLevel;
-            const s = Math.sqrt(b.vx*b.vx + b.vy*b.vy);
-            if(s < 3) {
-                b.vx *= 1.005;
-                b.vy *= 1.005;
-            } else if(s > 6) {
-                b.vx *= 0.995;
-                b.vy *= 0.995;
-            }
-            
-            cC();
-            
-            p.forEach(q => {
-                x.beginPath();
-                x.arc(w/2+q.x,h/2+q.y,q.r,0,Math.PI*2);
-                x.fillStyle = q.c;
-                x.fill();
-            });
-            
-            x.beginPath();
-            x.arc(w/2+b.x,h/2+b.y,b.r,0,Math.PI*2);
-            x.fillStyle = b.c;
-            x.fill();
-            
-            aT(b.x, b.y, b.vx, b.vy, b.c);
-            tl.forEach(particle => particle.draw(x));
-            
-            requestAnimationFrame(u);
-        };
-
-        // Window resize handling
-        const rS = () => {
-            w = window.innerWidth;
-            h = window.innerHeight;
-            r = Math.min(w,h)*0.45;
-            c.width = w * dpr;
-            c.height = h * dpr;
-            c.style.width = w + 'px';
-            c.style.height = h + 'px';
-            x.scale(dpr, dpr);
-            gP();
-        };
-
-        // Initialize with iOS fixes
-        window.onload = () => {
-            rS();
-            window.onresize = rS;
-            
-            // Initial velocity
-            b.vx = (Math.random()-0.5)*10;
-            b.vy = (Math.random()-0.5)*10;
-            
-            // UI controls with iOS audio fixes
-            document.getElementById('volumeSlider').oninput = (e) => {
-                volumeLevel = e.target.value / 10;
-                if (m) m.gain.value = 0.45 * volumeLevel;
-            };
-            
-            document.getElementById('speedSlider').oninput = (e) => {
-                speedLevel = e.target.value / 10;
-            };
-            
-            document.getElementById('colorSlider').oninput = (e) => {
-                colorRate = (e.target.value - 1) / 9;
-            };
-            
-            // Start animation
-            u();
-
-            // iOS audio initialization
-            const initAudio = () => {
-                initAudioContext();
+        // iOS audio initialization
+        const initAudio = (e) => {
+            initAudioContext();
+            lastAudioTime = Date.now();
+            if (e.type === 'touchstart') {
                 document.removeEventListener('touchstart', initAudio);
+            } else {
                 document.removeEventListener('click', initAudio);
-            };
-
-            document.addEventListener('touchstart', initAudio, {passive: true});
-            document.addEventListener('click', initAudio);
+            }
         };
-    </script>
+
+        document.addEventListener('touchstart', initAudio, {passive: true});
+        document.addEventListener('click', initAudio);
+        
+        // Start animation
+        u();
+    };
+
+    // Handle orientation changes
+    window.addEventListener('orientationchange', () => {
+        setTimeout(rS, 100); // Delay to ensure new dimensions are available
+    });
+
+    // Request fullscreen on iOS when added to home screen
+    if (window.navigator.standalone) {
+        document.documentElement.requestFullscreen?.();
+    }
+</script>
 </body>
-</html>
+</html> 
