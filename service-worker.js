@@ -35,7 +35,7 @@ self.addEventListener('activate', event => {
 // Network first, falling back to cache
 self.addEventListener('fetch', event => {
     event.respondWith(
-        fetch(event.request)
+        fetch(event.request.url.replace(self.location.origin, ''))
             .catch(() => caches.match(event.request))
     );
 });
